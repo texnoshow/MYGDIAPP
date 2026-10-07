@@ -1,13 +1,15 @@
 #include <windows.h>
 #include <ctime>
 
-int main() {
+// Правильная графическая точка входа для Windows-приложений
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     // Инициализируем генератор случайных чисел
     srand(static_cast<unsigned int>(time(0)));
 
     int screenWidth = GetSystemMetrics(SM_CXSCREEN);
     int screenHeight = GetSystemMetrics(SM_CYSCREEN);
 
+    // Бесконечный цикл визуального эффекта
     while (true) {
         HDC hdcScreen = GetDC(0);
 
@@ -24,16 +26,17 @@ int main() {
         // Выбираем кисть в контекст экрана
         HBRUSH hOldBrush = (HBRUSH)SelectObject(hdcScreen, hBrush);
 
-        // 3. Применяем PATINVERT (XOR цвета кисти и экрана)
-        // Это инвертирует цвета подложки в соответствии с выбранным цветом фильтра
+        // 3. Применяем инверсию цвета (XOR) в выбранной области
         PatBlt(hdcScreen, x, y, w, h, PATINVERT);
 
-        // Освобождаем ресурсы
+        // Освобождаем ресурсы, чтобы избежать утечек памяти
         SelectObject(hdcScreen, hOldBrush);
         DeleteObject(hBrush);
         ReleaseDC(0, hdcScreen);
 
-        Sleep(30); // Задержка между появлением фильтров (в миллисекундах)
+        // Задержка между эффектами (в миллисекундах)
+        Sleep(30); 
     }
+
     return 0;
 }
