@@ -1,4 +1,4 @@
-name: Build GDI App
+name: Build GDI App x86
 
 on:
   # 1. Защита: Разрешаем запуск сборки вручную через вкладку Actions
@@ -22,7 +22,7 @@ on:
 
 jobs:
   build:
-    name: Build Windows Application
+    name: Build Windows x86 Application
     runs-on: windows-latest
     
     # 3. Защита: Полностью блокируем запуск сборки, если коммит сделан автоматическим ботом
@@ -36,21 +36,23 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # Шаг 2: Инициализация окружения MSVC (Visual Studio Compiler)
-    - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v2
+    # Шаг 2: Настройка окружения Developer Command Prompt под архитектуру x86
+    - name: Configure Developer Command Prompt for MSVC (x86)
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x86
 
-    # Шаг 3: Компиляция C++ приложения с GDI-библиотеками
-    # Используются оптимизации /O2, а флаг /SUBSYSTEM:WINDOWS скрывает консольное окно.
-    # Если ваш главный файл называется по-другому, замените main.cpp на ваше имя.
+    # Шаг 3: Компиляция C++ приложения с GDI-библиотеками (архитектура x86)
+    # Флаг /SUBSYSTEM:WINDOWS скрывает консольное окно. 
+    # Убедитесь, что ваш файл в корне репозитория называется main.cpp
     - name: Compile GDI Application
       run: |
-        cl.exe /EHsc /O2 main.cpp /link /SUBSYSTEM:WINDOWS gdi32.lib user32.lib /OUT:GdiEffectsApp.exe
+        cl.exe /EHsc /O2 main.cpp /link /SUBSYSTEM:WINDOWS gdi32.lib user32.lib /OUT:GdiEffectsApp_x86.exe
 
-    # Шаг 4: Защита артефакта и выгрузка готового .exe файла на GitHub
+    # Шаг 4: Выгрузка готового 32-битного .exe файла в артефакты GitHub
     - name: Upload Build Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: gdi-effects-executable
-        path: GdiEffectsApp.exe
-        retention-days: 7 # Хранить файл всего 7 дней для экономии места в репозитории
+        name: gdi-effects-x86-executable
+        path: GdiEffectsApp_x86.exe
+        retention-days: 7  # Файл автоматически удалится через 7 дней для экономии места
