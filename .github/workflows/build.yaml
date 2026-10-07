@@ -1,0 +1,56 @@
+name: Build GDI App
+
+on:
+  # 1. Защита: Разрешаем запуск сборки вручную через вкладку Actions
+  workflow_dispatch:
+
+  # 2. Защита: Авто-сборка только при реальном изменении кода в ветке main
+  push:
+    branches: [ "main" ]
+    paths:
+      - '**.cpp'
+      - '**.h'
+      - '**.hpp'
+      - 'CMakeLists.txt'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - '**.cpp'
+      - '**.h'
+      - '**.hpp'
+      - 'CMakeLists.txt'
+
+jobs:
+  build:
+    name: Build Windows Application
+    runs-on: windows-latest
+    
+    # 3. Защита: Полностью блокируем запуск сборки, если коммит сделан автоматическим ботом
+    if: |
+      github.actor != 'dependabot[bot]' && 
+      github.actor != 'github-actions[bot]' && 
+      github.actor != 'actions-user'
+
+    steps:
+    # Шаг 1: Клонирование репозитория
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # Шаг 2: Инициализация окружения MSVC (Visual Studio Compiler)
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v2
+
+    # Шаг 3: Компиляция C++ приложения с GDI-библиотеками
+    # Используются оптимизации /O2, а флаг /SUBSYSTEM:WINDOWS скрывает консольное окно.
+    # Если ваш главный файл называется по-другому, замените main.cpp на ваше имя.
+    - name: Compile GDI Application
+      run: |
+        cl.exe /EHsc /O2 main.cpp /link /SUBSYSTEM:WINDOWS gdi32.lib user32.lib /OUT:GdiEffectsApp.exe
+
+    # Шаг 4: Защита артефакта и выгрузка готового .exe файла на GitHub
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: gdi-effects-executable
+        path: GdiEffectsApp.exe
+        retention-days: 7 # Хранить файл всего 7 дней для экономии места в репозитории
