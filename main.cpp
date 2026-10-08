@@ -69,7 +69,6 @@ DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
 // -------------------------------------------------------------
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     
-    // FIXED: Using safe ASCII English characters to eliminate encoding distortion
     int msgBoxResponse = MessageBoxA(
         NULL, 
         "WARNING!\n\nThis application contains intense flashing visual effects, rapid screen flashing, and loud 8-bit audio.\n\nDo you want to run the demonstration?", 
@@ -77,7 +76,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         MB_YESNO | MB_ICONWARNING | MB_TOPMOST
     );
 
-    // If the user clicks "No", close the application safely
     if (msgBoxResponse == IDNO) {
         return 0; 
     }
@@ -175,9 +173,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             DrawIcon(hdcScreen, x, y, hIcon);
         }
         else if (payloadMode == 5) {
-            if (soundValue > 230) {
-                PatBlt(hdcScreen, 0, 0, screenWidth, screenHeight, DSTINVERT);
-            }
+            // ИСПРАВЛЕНО: Условие soundValue > 230 удалено. 
+            // Теперь эффект работает непрерывно, инвертируя крупные случайные блоки экрана
+            int w = rand() % 400 + 200;  
+            int h = rand() % 400 + 200;  
+            int x = rand() % (screenWidth - w);
+            int y = rand() % (screenHeight - h);
+            
+            PatBlt(hdcScreen, x, y, w, h, DSTINVERT);
         }
 
         ReleaseDC(0, hdcScreen);
