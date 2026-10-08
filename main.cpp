@@ -9,22 +9,21 @@
 const int SAMPLE_RATE = 8000; 
 const int BUFFER_SIZE = 4000; 
 
-// Глобальные переменные старого типа (WinAPI Thread-safe не требуется для простых типов в таком режиме)
+// Глобальные переменные старого типа для совместимости с Vista/7
 volatile DWORD globalT = 0;
 volatile bool isRunning = true;
 
-// Самая первая оригинальная формула Bytebeat
+// Первая оригинальная формула Bytebeat
 inline BYTE GenerateBytebeat(DWORD t) {
     return static_cast<BYTE>((((t * (t >> 8 | t >> 9) & 46 & t >> 8)) ^ (t & t >> 13 | t >> 6)) & 0xFF);
 }
 
 // -------------------------------------------------------------
-// ПОТОК ЗВУКА: Классическая WinAPI-потоковая функция (DWORD WINAPI)
+// ПОТОК ЗВУКА: Классическая WinAPI-потоковая функция
 // -------------------------------------------------------------
 DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
     HWAVEOUT hWaveOut = (HWAVEOUT)lpParam;
     
-    // Структуры аудио-буферов вынесены в кучу для предотвращения проблем с памятью потока
     char* audioBuf1 = new char[BUFFER_SIZE];
     char* audioBuf2 = new char[BUFFER_SIZE];
 
@@ -34,7 +33,7 @@ DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
     waveOutPrepareHeader(hWaveOut, &waveHdr1, sizeof(WAVEHDR));
     waveOutPrepareHeader(hWaveOut, &waveHdr2, sizeof(WAVEHDR));
 
-    // Первичное наполнение
+    // Первичное наполнение буферов
     for (int i = 0; i < BUFFER_SIZE; ++i) audioBuf1[i] = GenerateBytebeat(InterlockedIncrement(&globalT));
     for (int i = 0; i < BUFFER_SIZE; ++i) audioBuf2[i] = GenerateBytebeat(InterlockedIncrement(&globalT));
 
@@ -44,16 +43,14 @@ DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
     WAVEHDR* currentHeader = &waveHdr1;
 
     while (isRunning) {
-        // Ожидание освобождения буфера звуковой картой
         while (!(currentHeader->dwFlags & WHDR_DONE) && isRunning) {
             Sleep(1); 
         }
 
         if (!isRunning) break;
 
-        // Генерация аудио
         for (int i = 0; i < BUFFER_SIZE; ++i) {
-            DWORD t = InterlockedIncrement(&globalT); // Безопасное инкрементирование в WinAPI
+            DWORD t = InterlockedIncrement(&globalT);
             currentHeader->lpData[i] = GenerateBytebeat(t);
         }
 
@@ -61,7 +58,6 @@ DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
         currentHeader = (currentHeader == &waveHdr1) ? &waveHdr2 : &waveHdr1;
     }
 
-    // Чистим буферы внутри потока
     waveOutUnprepareHeader(hWaveOut, &waveHdr1, sizeof(WAVEHDR));
     waveOutUnprepareHeader(hWaveOut, &waveHdr2, sizeof(WAVEHDR));
     delete[] audioBuf1;
@@ -71,7 +67,7 @@ DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
 }
 
 // -------------------------------------------------------------
-// ГЛАВНЫЙ ПОТОК: Графика и инициализация
+// ГЛАВНЫЙ ПОТОК: Безумная непрерывная графика
 // -------------------------------------------------------------
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     srand(static_cast<unsigned int>(time(0)));
@@ -92,7 +88,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
-    // Создаем поток старым методом через CreateThread (без использования библиотек C++11)
     HANDLE hAudioThread = CreateThread(NULL, 0, AudioThreadFunc, hWaveOut, 0, NULL);
 
     // Главный цикл графических эффектов
@@ -100,30 +95,31 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         DWORD t = globalT; 
         BYTE soundValue = GenerateBytebeat(t);
 
-        if (soundValue > 120) {
-            HDC hdcScreen = GetDC(0);
+        // УСЛОВИЕ УБРАНО: Теперь отрисовка идет ПОСТОЯННО и без пауз
+        HDC hdcScreen = GetDC(0);
 
-            int w = rand() % 200 + 50;  
-            int h = rand() % 200 + 50;  
-            int x = rand() % (screenWidth - w);
-            int y = rand() % (screenHeight - h);
+        // Размеры динамически зависят от текущего звукового байта
+        int w = (soundValue % 200) + 50;  
+        int h = ((soundValue >> 2) % 200) + 50;  
+        int x = rand() % (screenWidth - w);
+        int y = rand() % (screenHeight - h);
 
-            COLORREF syncColor = RGB(soundValue, (soundValue ^ (t >> 4)) & 0xFF, (t >> 8) & 0xFF);
-            HBRUSH hBrush = CreateSolidBrush(syncColor);
-            HBRUSH hOldBrush = (HBRUSH)SelectObject(hdcScreen, hBrush);
+        // Цвет меняется строго по алгоритму трека
+        COLORREF syncColor = RGB(soundValue, (soundValue ^ (t >> 4)) & 0xFF, (t >> 8) & 0xFF);
+        HBRUSH hBrush = CreateSolidBrush(syncColor);
+        HBRUSH hOldBrush = (HBRUSH)SelectObject(hdcScreen, hBrush);
 
-            PatBlt(hdcScreen, x, y, w, h, PATINVERT);
+        // Постоянная инверсия
+        PatBlt(hdcScreen, x, y, w, h, PATINVERT);
 
-            SelectObject(hdcScreen, hOldBrush);
-            DeleteObject(hBrush);
-            ReleaseDC(0, hdcScreen);
-        }
+        SelectObject(hdcScreen, hOldBrush);
+        DeleteObject(hBrush);
+        ReleaseDC(0, hdcScreen);
 
-        // Чистый WinAPI Sleep вместо std::this_thread::sleep_for
-        Sleep(5); 
+        // Задержка снижена до 1 мс для максимального FPS и плотности эффекта
+        Sleep(1); 
     }
 
-    // Корректно тушим звуковой поток
     isRunning = false;
     if (hAudioThread != NULL) {
         WaitForSingleObject(hAudioThread, INFINITE);
