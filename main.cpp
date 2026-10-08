@@ -7,11 +7,10 @@
 
 // Настройки аудио (классический Bytebeat)
 const int SAMPLE_RATE = 8000; 
-const int BUFFER_SIZE = 2000; // ~0.25 секунды на буфер для отзывчивого синхрона
+const int BUFFER_SIZE = 4000; // Оптимальный размер буфера для стабильного потока (~0.5 сек)
 
 // Функция генерации Bytebeat (возвращает значение от 0 до 255)
 inline BYTE GenerateBytebeat(DWORD t) {
-    // Легендарная формула, задающая ритм и мелодию
     return static_cast<BYTE>((t * (t >> 8 | t >> 9) & 46 & t >> 8) ^ (t & t >> 13 | t >> 6));
 }
 
@@ -36,9 +35,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
-    // 2. Выделяем два звуковых буфера для непрерывного двойного буферизованного вывода
-    char audioBuf1[BUFFER_SIZE];
-    char audioBuf2[BUFFER_SIZE];
+    // 2. Выделяем два звуковых буфера
+    char audioBuf1[BUFFER_SIZE] = {0};
+    char audioBuf2[BUFFER_SIZE] = {0};
 
     WAVEHDR waveHdr1 = { audioBuf1, BUFFER_SIZE, 0, 0, 0, 0, nullptr, 0 };
     WAVEHDR waveHdr2 = { audioBuf2, BUFFER_SIZE, 0, 0, 0, 0, nullptr, 0 };
@@ -47,66 +46,67 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     waveOutPrepareHeader(hWaveOut, &waveHdr2, sizeof(WAVEHDR));
 
     DWORD t = 0; // Глобальный счетчик времени для Bytebeat
-    WAVEHDR* currentHeader = &waveHdr1;
 
-    // Главный цикл (работает, пока не нажмут ESC для безопасного выхода)
-    while (!(GetAsyncKeyState(VK_ESCAPE) & 0x8000)) {
-        
-        // Заполняем текущий аудио-буфер звуком и одновременно рисуем графику
+    // Функция заполнения буфера звуком и синхронной графикой
+    auto FillBufferAndRender = [&](WAVEHDR* header) {
         for (int i = 0; i < BUFFER_SIZE; ++i) {
             BYTE soundValue = GenerateBytebeat(t);
-            currentHeader->lpData[i] = soundValue;
+            header->lpData[i] = soundValue;
 
-            // СИНХРОНИЗАЦИЯ: Визуальный эффект срабатывает в такт сильным долям или пикам звука
-            // soundValue > 128 означает верхнюю половину амплитуды волны (акцент в звуке)
-            // Дополнительное деление (t % 64 == 0) защищает процессор от перегрузки GDI
+            // СИНХРОНИЗАЦИЯ: Визуальный эффект в такт звуку
             if (soundValue > 128 && (t % 64 == 0)) {
                 HDC hdcScreen = GetDC(0);
 
-                // Динамика: размеры зависят от текущего значения звука
                 int w = (soundValue % 200) + 50;
                 int h = ((soundValue >> 2) % 200) + 50;
                 int x = rand() % (screenWidth - w);
                 int y = rand() % (screenHeight - h);
 
-                // Цвет: формируется на основе математики Bytebeat
-                COLORREF syncColor = RGB(
-                    soundValue, 
-                    (soundValue ^ (t >> 4)) & 0xFF, 
-                    (t >> 8) & 0xFF
-                );
-                
+                COLORREF syncColor = RGB(soundValue, (soundValue ^ (t >> 4)) & 0xFF, (t >> 8) & 0xFF);
                 HBRUSH hBrush = CreateSolidBrush(syncColor);
                 HBRUSH hOldBrush = (HBRUSH)SelectObject(hdcScreen, hBrush);
 
-                // Оставляем исходный эффект инверсии (PATINVERT)
                 PatBlt(hdcScreen, x, y, w, h, PATINVERT);
 
                 SelectObject(hdcScreen, hOldBrush);
                 DeleteObject(hBrush);
                 ReleaseDC(0, hdcScreen);
             }
-
             t++;
         }
+    };
 
-        // Отправляем заполненный буфер на воспроизведение
-        waveOutWrite(hWaveOut, currentHeader, sizeof(WAVEHDR));
+    // 3. Первичное заполнение и запуск обоих буферов в очередь звуковой карты
+    FillBufferAndRender(&waveHdr1);
+    waveOutWrite(hWaveOut, &waveHdr1, sizeof(WAVEHDR));
 
-        // Переключаемся на второй буфер
-        currentHeader = (currentHeader == &waveHdr1) ? &waveHdr2 : &waveHdr1;
+    FillBufferAndRender(&waveHdr2);
+    waveOutWrite(hWaveOut, &waveHdr2, sizeof(WAVEHDR));
 
-        // Ждем, пока устройство освободит следующий буфер, чтобы не забить память
+    WAVEHDR* currentHeader = &waveHdr1;
+
+    // Главный бесконечный цикл (выход по ESC)
+    while (!(GetAsyncKeyState(VK_ESCAPE) & 0x8000)) {
+        
+        // Ожидаем, пока текущий буфер полностью отыграет (Windows выставит флаг WHDR_DONE)
         while (!(currentHeader->dwFlags & WHDR_DONE)) {
             if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) break;
-            Sleep(1); // Легкий отдых для CPU
+            Sleep(10); // Разгружаем процессор во время ожидания
         }
-        
-        // Сбрасываем флаг готовности буфера перед новым циклом
-        currentHeader->dwFlags &= ~WHDR_DONE;
+
+        if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) break;
+
+        // Как только буфер освободился — генерируем в него следующую порцию звука/видео
+        FillBufferAndRender(currentHeader);
+
+        // Отправляем буфер обратно в очередь воспроизведения
+        waveOutWrite(hWaveOut, currentHeader, sizeof(WAVEHDR));
+
+        // Переключаем указатель на противоположный буфер
+        currentHeader = (currentHeader == &waveHdr1) ? &waveHdr2 : &waveHdr1;
     }
 
-    // Очистка памяти и остановка звука при выходе
+    // 4. Очистка ресурсов при выходе
     waveOutReset(hWaveOut);
     waveOutUnprepareHeader(hWaveOut, &waveHdr1, sizeof(WAVEHDR));
     waveOutUnprepareHeader(hWaveOut, &waveHdr2, sizeof(WAVEHDR));
