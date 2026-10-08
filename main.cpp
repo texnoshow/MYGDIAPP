@@ -1,12 +1,9 @@
 #include <windows.h>
 #include <mmsystem.h>
-#include <shlobj.h> // Библиотека для работы с системными папками (включая Startup)
 #include <ctime>
 
-// Подключаем необходимые системные библиотеки напрямую в коде
+// Подключаем библиотеку для работы со звуком
 #pragma comment(lib, "winmm.lib")
-#pragma comment(lib, "shell32.lib")
-#pragma comment(lib, "ole32.lib")
 
 // Настройки аудио (классический Bytebeat)
 const int SAMPLE_RATE = 8000; 
@@ -20,28 +17,8 @@ inline BYTE GenerateBytebeat(DWORD t) {
     return static_cast<BYTE>((((t * (t >> 8 | t >> 9) & 46 & t >> 8)) ^ (t & t >> 13 | t >> 6)) & 0xFF);
 }
 
-// Функция для копирования файла в папку "Автозагрузка" текущего пользователя
-void CopyProgramToStartupFolder() {
-    char szStartupPath[MAX_PATH];
-    
-    // Получаем путь к папке автозагрузки текущего пользователя (работает на XP, Vista, 7, 10, 11)
-    if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_STARTUP, NULL, 0, szStartupPath))) {
-        
-        // Получаем полный путь к текущему запущенному exe-файлу
-        char szCurrentProgPath[MAX_PATH];
-        GetModuleFileNameA(NULL, szCurrentProgPath, MAX_PATH);
-
-        // Формируем имя конечного файла в папке автозагрузки
-        // Например: C:\Users\Имя\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\GdiEffectsApp.exe
-        lstrcatA(szStartupPath, "\\GdiEffectsApp.exe");
-
-        // Копируем файл. Параметр FALSE означает, что если файл уже существует, он будет перезаписан
-        CopyFileA(szCurrentProgPath, szStartupPath, FALSE);
-    }
-}
-
 // -------------------------------------------------------------
-// ПОТОК ЗВУКА: Классическая WinAPI-потоковая функция
+// ПОТОК ЗВУКА: Работает независимо в фоне
 // -------------------------------------------------------------
 DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
     HWAVEOUT hWaveOut = (HWAVEOUT)lpParam;
@@ -88,12 +65,9 @@ DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
 }
 
 // -------------------------------------------------------------
-// ГЛАВНЫЙ ПОТОК: Безумная непрерывная графика
+// ГЛАВНЫЙ ПОТОК: Динамическое визуальное шоу
 // -------------------------------------------------------------
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-    // Копируем исполняемый файл в автозагрузку при запуске
-    CopyProgramToStartupFolder();
-
     srand(static_cast<unsigned int>(time(0)));
 
     int screenWidth = GetSystemMetrics(SM_CXSCREEN);
@@ -114,31 +88,70 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     HANDLE hAudioThread = CreateThread(NULL, 0, AudioThreadFunc, hWaveOut, 0, NULL);
 
-    // Полностью бесконечный цикл без возможности выхода по ESC
     while (true) {
         DWORD t = globalT; 
         BYTE soundValue = GenerateBytebeat(t);
 
         HDC hdcScreen = GetDC(0);
 
-        int w = (soundValue % 200) + 50;  
-        int h = ((soundValue >> 2) % 200) + 50;  
-        int x = rand() % (screenWidth - w);
-        int y = rand() % (screenHeight - h);
+        // Используем старшие биты переменной времени t (t >> 14), чтобы циклически
+        // переключать разные визуальные эффекты по мере развития мелодии
+        int payloadMode = (t >> 14) % 3; 
 
-        COLORREF syncColor = RGB(soundValue, (soundValue ^ (t >> 4)) & 0xFF, (t >> 8) & 0xFF);
-        HBRUSH hBrush = CreateSolidBrush(syncColor);
-        HBRUSH hOldBrush = (HBRUSH)SelectObject(hdcScreen, hBrush);
+        if (payloadMode == 0) {
+            // ЭФФЕКТ 1: Классические инвертированные прямоугольники (PATINVERT)
+            int w = (soundValue % 200) + 50;  
+            int h = ((soundValue >> 2) % 200) + 50;  
+            int x = rand() % (screenWidth - w);
+            int y = rand() % (screenHeight - h);
 
-        PatBlt(hdcScreen, x, y, w, h, PATINVERT);
+            COLORREF syncColor = RGB(soundValue, (soundValue ^ (t >> 4)) & 0xFF, (t >> 8) & 0xFF);
+            HBRUSH hBrush = CreateSolidBrush(syncColor);
+            HBRUSH hOldBrush = (HBRUSH)SelectObject(hdcScreen, hBrush);
 
-        SelectObject(hdcScreen, hOldBrush);
-        DeleteObject(hBrush);
+            PatBlt(hdcScreen, x, y, w, h, PATINVERT);
+
+            SelectObject(hdcScreen, hOldBrush);
+            DeleteObject(hBrush);
+        } 
+        else if (payloadMode == 1) {
+            // ЭФФЕКТ 2: Тонкие геометрические линии, перекрещивающие экран в такт частоте
+            int x1 = rand() % screenWidth;
+            int y1 = rand() % screenHeight;
+            int x2 = rand() % screenWidth;
+            int y2 = rand() % screenHeight;
+
+            COLORREF lineColor = RGB((t >> 5) & 0xFF, soundValue, 255 - soundValue);
+            HPEN hPen = CreatePen(PS_SOLID, 2, lineColor);
+            HPEN hOldPen = (HPEN)SelectObject(hdcScreen, hPen);
+
+            MoveToEx(hdcScreen, x1, y1, NULL);
+            LineTo(hdcScreen, x2, y2);
+
+            SelectObject(hdcScreen, hOldPen);
+            DeleteObject(hPen);
+        } 
+        else if (payloadMode == 2) {
+            // ЭФФЕКТ 3: Рисование случайных эллипсов и кругов
+            int radius = (soundValue % 100) + 20;
+            int x = rand() % screenWidth;
+            int y = rand() % screenHeight;
+
+            COLORREF circleColor = RGB(255 - soundValue, (t >> 6) & 0xFF, soundValue);
+            HBRUSH hBrush = CreateSolidBrush(circleColor);
+            HBRUSH hOldBrush = (HBRUSH)SelectObject(hdcScreen, hBrush);
+
+            Ellipse(hdcScreen, x - radius, y - radius, x + radius, y + radius);
+
+            SelectObject(hdcScreen, hOldBrush);
+            DeleteObject(hBrush);
+        }
+
         ReleaseDC(0, hdcScreen);
-
-        Sleep(1); 
+        Sleep(2); 
     }
 
+    // Завершение работы
     isRunning = false;
     if (hAudioThread != NULL) {
         WaitForSingleObject(hAudioThread, INFINITE);
