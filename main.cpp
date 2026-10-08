@@ -65,9 +65,23 @@ DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
 }
 
 // -------------------------------------------------------------
-// ГЛАВНЫЙ ПОТОК: Динамическое визуальное шоу
+// ГЛАВНЫЙ ПОТОК: Расширенное визуальное шоу
 // -------------------------------------------------------------
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    
+    // ДОБАВЛЕНО ПРЕДУПРЕЖДЕНИЕ: Окно сообщения с кнопками "Да" и "Нет"
+    int msgBoxResponse = MessageBoxA(
+        NULL, 
+        "Внимание!\n\nДанная программа содержит интенсивные визуальные эффекты, быстрое мерцание экрана и громкий 8-битный звук.\n\nВы действительно хотите запустить демонстрацию?", 
+        "Предупреждение демо-сцены", 
+        MB_YESNO | MB_ICONWARNING | MB_TOPMOST
+    );
+
+    // Если пользователь нажал "Нет" (или закрыл окно), программа безопасно завершает работу
+    if (msgBoxResponse == IDNO) {
+        return 0; 
+    }
+
     srand(static_cast<unsigned int>(time(0)));
 
     int screenWidth = GetSystemMetrics(SM_CXSCREEN);
@@ -94,12 +108,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
         HDC hdcScreen = GetDC(0);
 
-        // Используем старшие биты переменной времени t (t >> 14), чтобы циклически
-        // переключать разные визуальные эффекты по мере развития мелодии
-        int payloadMode = (t >> 14) % 3; 
+        int payloadMode = (t >> 14) % 6; 
 
         if (payloadMode == 0) {
-            // ЭФФЕКТ 1: Классические инвертированные прямоугольники (PATINVERT)
             int w = (soundValue % 200) + 50;  
             int h = ((soundValue >> 2) % 200) + 50;  
             int x = rand() % (screenWidth - w);
@@ -115,7 +126,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             DeleteObject(hBrush);
         } 
         else if (payloadMode == 1) {
-            // ЭФФЕКТ 2: Тонкие геометрические линии, перекрещивающие экран в такт частоте
             int x1 = rand() % screenWidth;
             int y1 = rand() % screenHeight;
             int x2 = rand() % screenWidth;
@@ -132,7 +142,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             DeleteObject(hPen);
         } 
         else if (payloadMode == 2) {
-            // ЭФФЕКТ 3: Рисование случайных эллипсов и кругов
             int radius = (soundValue % 100) + 20;
             int x = rand() % screenWidth;
             int y = rand() % screenHeight;
@@ -146,12 +155,35 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             SelectObject(hdcScreen, hOldBrush);
             DeleteObject(hBrush);
         }
+        else if (payloadMode == 3) {
+            int x = rand() % screenWidth;
+            int y = rand() % screenHeight;
+            int w = rand() % 300 + 50;
+            int h = rand() % 300 + 50;
+            
+            BitBlt(hdcScreen, x + (soundValue % 10) - 5, y + (soundValue % 10) - 5, w, h, hdcScreen, x, y, SRCCOPY);
+        }
+        else if (payloadMode == 4) {
+            int x = rand() % screenWidth;
+            int y = rand() % screenHeight;
+            
+            LPCSTR iconType = IDI_APPLICATION;
+            if (soundValue % 3 == 0) iconType = IDI_WARNING;
+            else if (soundValue % 3 == 1) iconType = IDI_ERROR;
+            
+            HICON hIcon = LoadIconA(NULL, iconType);
+            DrawIcon(hdcScreen, x, y, hIcon);
+        }
+        else if (payloadMode == 5) {
+            if (soundValue > 230) {
+                PatBlt(hdcScreen, 0, 0, screenWidth, screenHeight, DSTINVERT);
+            }
+        }
 
         ReleaseDC(0, hdcScreen);
         Sleep(2); 
     }
 
-    // Завершение работы
     isRunning = false;
     if (hAudioThread != NULL) {
         WaitForSingleObject(hAudioThread, INFINITE);
