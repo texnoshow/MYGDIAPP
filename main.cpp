@@ -2,23 +2,23 @@
 #include <mmsystem.h>
 #include <ctime>
 
-// Подключаем библиотеку для работы со звуком
+// Link the multimedia library for audio playback
 #pragma comment(lib, "winmm.lib")
 
-// Настройки аудио (классический Bytebeat)
+// Audio configurations (Classic Bytebeat)
 const int SAMPLE_RATE = 8000; 
 const int BUFFER_SIZE = 4000; 
 
 volatile DWORD globalT = 0;
 volatile bool isRunning = true;
 
-// Первая оригинальная формула Bytebeat
+// Original Bytebeat formula
 inline BYTE GenerateBytebeat(DWORD t) {
     return static_cast<BYTE>((((t * (t >> 8 | t >> 9) & 46 & t >> 8)) ^ (t & t >> 13 | t >> 6)) & 0xFF);
 }
 
 // -------------------------------------------------------------
-// ПОТОК ЗВУКА: Работает независимо в фоне
+// AUDIO THREAD: Handles real-time generation in the background
 // -------------------------------------------------------------
 DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
     HWAVEOUT hWaveOut = (HWAVEOUT)lpParam;
@@ -65,19 +65,19 @@ DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
 }
 
 // -------------------------------------------------------------
-// ГЛАВНЫЙ ПОТОК: Расширенное визуальное шоу
+// MAIN THREAD: Visual Showcase and Controls
 // -------------------------------------------------------------
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     
-    // ИСПРАВЛЕНО: Использование MessageBoxW и широких строк L"" для поддержки Unicode
-    int msgBoxResponse = MessageBoxW(
+    // FIXED: Using safe ASCII English characters to eliminate encoding distortion
+    int msgBoxResponse = MessageBoxA(
         NULL, 
-        L"Внимание!\n\nДанная программа содержит интенсивные визуальные эффекты, быстрое мерцание экрана и громкий 8-битный звук.\n\nВы действительно хотите запустить демонстрацию?", 
-        L"Предупреждение демо-сцены", 
+        "WARNING!\n\nThis application contains intense flashing visual effects, rapid screen flashing, and loud 8-bit audio.\n\nDo you want to run the demonstration?", 
+        "Demo Scene Warning", 
         MB_YESNO | MB_ICONWARNING | MB_TOPMOST
     );
 
-    // Если пользователь нажал "Нет" (или закрыл окно), программа безопасно завершает работу
+    // If the user clicks "No", close the application safely
     if (msgBoxResponse == IDNO) {
         return 0; 
     }
