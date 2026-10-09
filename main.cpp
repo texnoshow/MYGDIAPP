@@ -1,24 +1,26 @@
 #include <windows.h>
 #include <mmsystem.h>
 #include <ctime>
+#include <atomic> // Используем для безопасной синхронизации между потоками
 
-// Link the multimedia library for audio playback
+// Линковка мультимедийной библиотеки для воспроизведения звука
 #pragma comment(lib, "winmm.lib")
 
-// Audio configurations (Classic Bytebeat)
+// Конфигурация аудиопотока
 const int SAMPLE_RATE = 8000; 
 const int BUFFER_SIZE = 4000; 
 
-volatile DWORD globalT = 0;
-volatile bool isRunning = true;
+// Атомарные переменные для предотвращения Data Race (состояния гонки)
+std::atomic<DWORD> globalT{0};
+std::atomic<bool> isRunning{true};
 
-// Original Bytebeat formula
+// Новая адаптированная формула Bytebeat (эффект глитча / зависания звука)
 inline BYTE GenerateBytebeat(DWORD t) {
-    return static_cast<BYTE>((((t * (t >> 8 | t >> 9) & 46 & t >> 8)) ^ (t & t >> 13 | t >> 6)) & 0xFF);
+    return static_cast<BYTE>(((t % 64) ^ (t >> 3)) * 4);
 }
 
 // -------------------------------------------------------------
-// AUDIO THREAD: Handles real-time generation in the background
+// АУДИОПОТОК: Фоновая генерация звуковой волны в реальном времени
 // -------------------------------------------------------------
 DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
     HWAVEOUT hWaveOut = (HWAVEOUT)lpParam;
@@ -32,23 +34,26 @@ DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
     waveOutPrepareHeader(hWaveOut, &waveHdr1, sizeof(WAVEHDR));
     waveOutPrepareHeader(hWaveOut, &waveHdr2, sizeof(WAVEHDR));
 
-    for (int i = 0; i < BUFFER_SIZE; ++i) audioBuf1[i] = GenerateBytebeat(InterlockedIncrement(&globalT));
-    for (int i = 0; i < BUFFER_SIZE; ++i) audioBuf2[i] = GenerateBytebeat(InterlockedIncrement(&globalT));
+    // Первичное заполнение буферов
+    for (int i = 0; i < BUFFER_SIZE; ++i) audioBuf1[i] = GenerateBytebeat(globalT.fetch_add(1));
+    for (int i = 0; i < BUFFER_SIZE; ++i) audioBuf2[i] = GenerateBytebeat(globalT.fetch_add(1));
 
     waveOutWrite(hWaveOut, &waveHdr1, sizeof(WAVEHDR));
     waveOutWrite(hWaveOut, &waveHdr2, sizeof(WAVEHDR));
 
     WAVEHDR* currentHeader = &waveHdr1;
 
-    while (isRunning) {
-        while (!(currentHeader->dwFlags & WHDR_DONE) && isRunning) {
+    while (isRunning.load()) {
+        // Ожидаем, пока звуковая карта освободит текущий буфер
+        while (!(currentHeader->dwFlags & WHDR_DONE) && isRunning.load()) {
             Sleep(1); 
         }
 
-        if (!isRunning) break;
+        if (!isRunning.load()) break;
 
+        // Заполняем освободившийся буфер новыми значениями из формулы
         for (int i = 0; i < BUFFER_SIZE; ++i) {
-            DWORD t = InterlockedIncrement(&globalT);
+            DWORD t = globalT.fetch_add(1);
             currentHeader->lpData[i] = GenerateBytebeat(t);
         }
 
@@ -56,6 +61,7 @@ DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
         currentHeader = (currentHeader == &waveHdr1) ? &waveHdr2 : &waveHdr1;
     }
 
+    // Корректная очистка аудио-ресурсов
     waveOutUnprepareHeader(hWaveOut, &waveHdr1, sizeof(WAVEHDR));
     waveOutUnprepareHeader(hWaveOut, &waveHdr2, sizeof(WAVEHDR));
     delete[] audioBuf1;
@@ -65,13 +71,13 @@ DWORD WINAPI AudioThreadFunc(LPVOID lpParam) {
 }
 
 // -------------------------------------------------------------
-// MAIN THREAD: Visual Showcase and Controls
+// ГЛАВНЫЙ ПОТОК: Отрисовка графики GDI на экране
 // -------------------------------------------------------------
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     
     int msgBoxResponse = MessageBoxA(
         NULL, 
-        "WARNING!\n\nThis application contains intense flashing visual effects, rapid screen flashing, and loud 8-bit audio.\n\nDo you want to run the demonstration?", 
+        "WARNING!\n\nThis application contains intense flashing visual effects, rapid screen flashing, and loud 8-bit audio.\n\nPress ESCAPE key during execution to stop the demo.\n\nDo you want to run the demonstration?", 
         "Demo Scene Warning", 
         MB_YESNO | MB_ICONWARNING | MB_TOPMOST
     );
@@ -85,6 +91,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     int screenWidth = GetSystemMetrics(SM_CXSCREEN);
     int screenHeight = GetSystemMetrics(SM_CYSCREEN);
 
+    // Настройка формата аудио 8-бит Моно
     WAVEFORMATEX wfx = {};
     wfx.wFormatTag = WAVE_FORMAT_PCM;
     wfx.nChannels = 1;
@@ -98,13 +105,21 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 1;
     }
 
+    // Запуск фонового аудиопотока
     HANDLE hAudioThread = CreateThread(NULL, 0, AudioThreadFunc, hWaveOut, 0, NULL);
 
-    while (true) {
-        DWORD t = globalT; 
+    // Главный цикл теперь проверяет флаг isRunning и нажатие клавиши ESCAPE
+    while (isRunning.load()) {
+        if (GetAsyncKeyState(VK_ESCAPE)) {
+            isRunning.store(false); // Штатный выход по нажатию ESC
+            break;
+        }
+
+        DWORD t = globalT.load(); 
         BYTE soundValue = GenerateBytebeat(t);
 
         HDC hdcScreen = GetDC(0);
+        if (!hdcScreen) continue;
 
         int payloadMode = (t >> 14) % 6; 
 
@@ -170,11 +185,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             else if (soundValue % 3 == 1) iconType = IDI_ERROR;
             
             HICON hIcon = LoadIconA(NULL, iconType);
-            DrawIcon(hdcScreen, x, y, hIcon);
+            if (hIcon) {
+                DrawIcon(hdcScreen, x, y, hIcon);
+                DestroyIcon(hIcon); // ИСПРАВЛЕНО: Уничтожаем дескриптор, чтобы избежать GDI Leak
+            }
         }
         else if (payloadMode == 5) {
-            // ИСПРАВЛЕНО: Условие soundValue > 230 удалено. 
-            // Теперь эффект работает непрерывно, инвертируя крупные случайные блоки экрана
             int w = rand() % 400 + 200;  
             int h = rand() % 400 + 200;  
             int x = rand() % (screenWidth - w);
@@ -187,7 +203,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         Sleep(2); 
     }
 
-    isRunning = false;
+    // Корректное завершение потоков и освобождение аудиокарты Windows
+    isRunning.store(false);
     if (hAudioThread != NULL) {
         WaitForSingleObject(hAudioThread, INFINITE);
         CloseHandle(hAudioThread);
