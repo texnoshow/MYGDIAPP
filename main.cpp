@@ -73,7 +73,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         NULL, 
         "WARNING!\n\nThis application contains intense flashing visual effects, rapid screen flashing, and loud 8-bit audio.\n\nDo you want to run the demonstration?", 
         "Demo Scene Warning", 
-        MB_YESNO | MB_ICONWARNING | MB_TOPMOST
+        MB_YES | MB_ICONWARNING | MB_TOPMOST
     );
 
     if (msgBoxResponse == IDNO) {
